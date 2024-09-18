@@ -4,9 +4,10 @@ import qrcode
 import boto3
 import os
 from io import BytesIO
-
-# Loading Environment variable (AWS Access Key and Secret Key)
+import base64
 from dotenv import load_dotenv
+
+# Loading Environment variable (AWS Access Key, Secret Key, and ENV)
 load_dotenv()
 
 app = FastAPI()
@@ -24,12 +25,22 @@ app.add_middleware(
 )
 
 # AWS S3 Configuration
-s3 = boto3.client(
-    's3',
-    aws_access_key_id= os.getenv("AWS_ACCESS_KEY"),
-    aws_secret_access_key= os.getenv("AWS_SECRET_KEY"))
+aws_access_key_id = os.getenv("AWS_ACCESS_KEY")
+aws_secret_access_key = os.getenv("AWS_SECRET_KEY")
+bucket_name = 'YOUR_BUCKET_NAME'  # Add your bucket name here
 
-bucket_name = 'YOUR_BUCKET_NAME' # Add your bucket name here
+# Initialize S3 client only if credentials are provided
+if aws_access_key_id and aws_secret_access_key:
+    s3 = boto3.client(
+        's3',
+        aws_access_key_id=aws_access_key_id,
+        aws_secret_access_key=aws_secret_access_key
+    )
+else:
+    s3 = None
+
+# Check if the app should store data in S3 (for K8s deployment)
+store_in_s3 = os.getenv("STORE_IN_S3", "false").lower() == "true"
 
 @app.post("/generate-qr/")
 async def generate_qr(url: str):
@@ -44,22 +55,26 @@ async def generate_qr(url: str):
     qr.make(fit=True)
 
     img = qr.make_image(fill_color="black", back_color="white")
-    
+
     # Save QR Code to BytesIO object
     img_byte_arr = BytesIO()
     img.save(img_byte_arr, format='PNG')
     img_byte_arr.seek(0)
 
-    # Generate file name for S3
-    file_name = f"qr_codes/{url.split('//')[-1]}.png"
+    if store_in_s3 and s3:
+        # Generate file name for S3
+        file_name = f"qr_codes/{url.split('//')[-1]}.png"
 
-    try:
-        # Upload to S3
-        s3.put_object(Bucket=bucket_name, Key=file_name, Body=img_byte_arr, ContentType='image/png', ACL='public-read')
-        
-        # Generate the S3 URL
-        s3_url = f"https://{bucket_name}.s3.amazonaws.com/{file_name}"
-        return {"qr_code_url": s3_url}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
+        try:
+            # Upload to S3
+            s3.put_object(Bucket=bucket_name, Key=file_name, Body=img_byte_arr, ContentType='image/png', ACL='public-read')
+
+            # Generate the S3 URL
+            s3_url = f"https://{bucket_name}.s3.amazonaws.com/{file_name}"
+            return {"qr_code_url": s3_url}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    else:
+        # Return the QR Code as a base64 string if S3 is disabled
+        img_base64 = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
+        return {"qr_code_base64": img_base64}
