@@ -8,11 +8,15 @@ export default function Home() {
   const [qrCodeUrl, setQrCodeUrl] = useState('');
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-      const response = await axios.post(`${apiUrl}/generate-qr/?url=${url}`);
-      setQrCodeUrl(response.data.qr_code_url);
+  e.preventDefault();
+  try {
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';  // Fallback for local development
+      const response = await axios.post(`${backendUrl}/generate-qr/?url=${url}`);
+      if (response.data.qr_code_base64) {
+        setQrCodeUrl(`data:image/png;base64,${response.data.qr_code_base64}`);
+      } else {
+        setQrCodeUrl(response.data.qr_code_url);
+      }
     } catch (error) {
       console.error('Error generating QR Code:', error);
     }
